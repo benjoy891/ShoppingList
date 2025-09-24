@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:shopping_list/data/categories.dart';
 import 'package:shopping_list/models/grocery_item.dart';
 import 'package:shopping_list/widgets/new_item.dart';
+import 'package:http/http.dart' as http;
 
 class ShoppingList extends StatefulWidget {
   const ShoppingList({super.key});
@@ -10,40 +14,108 @@ class ShoppingList extends StatefulWidget {
 }
 
 class _ShoppingListState extends State<ShoppingList> {
-  final List<GroceryItem> _groceryItem = [];
+  List<GroceryItem> _groceryItem = [];
+  var _isLoading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadItems();
+  }
+
+  void _loadItems() async {
+    final url = Uri.https(
+      'flutter-prep-2bea8-default-rtdb.firebaseio.com',
+      'shopping-list.json',
+    );
+
+    try {
+      final response = await http.get(url);
+      print(response.body);
+      print(response.statusCode);
+      if (response.statusCode >= 400) {
+        setState(() {
+          _error = "Failed to fetch data. Please try again later.";
+        });
+      }
+
+      if (response.body == 'null') {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+      final Map<String, dynamic> listData = json.decode(response.body);
+      final List<GroceryItem> loadedItems = [];
+      for (final item in listData.entries) {
+        final category = categories.entries
+            .firstWhere(
+              (catItem) => catItem.value.title == item.value['category'],
+            )
+            .value;
+        loadedItems.add(
+          GroceryItem(
+            id: item.key,
+            name: item.value['name'],
+            quantity: item.value["quantity"],
+            category: category,
+          ),
+        );
+      }
+      setState(() {
+        _groceryItem = loadedItems;
+        _isLoading = false;
+      });
+    } catch (error) {
+      setState(() {
+        _error = "Failed to fetch data. Please try again later.";
+      });
+    }
+  }
 
   void _addItem() async {
     final newItem = await Navigator.of(
       context,
     ).push(MaterialPageRoute(builder: (ctx) => NewItemScreen()));
-
     if (newItem == null) {
       return;
     }
-
     setState(() {
       _groceryItem.add(newItem);
     });
   }
 
-  void _onRemoveItem(GroceryItem newItem) {
-    final itemIndex = _groceryItem.indexOf(newItem);
+  void _onRemoveItem(GroceryItem newItem) async {
+    final index = _groceryItem.indexOf(newItem);
     setState(() {
       _groceryItem.remove(newItem);
     });
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        duration: const Duration(seconds: 2),
-        content: const Text("Item deleted"),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () {
-            _groceryItem.insert(itemIndex, newItem);
-          },
-        ),
-      ),
+    final url = Uri.https(
+      'flutter-prep-2bea8-default-rtdb.firebaseio.com',
+      'shopping-list/${newItem.id}.json',
     );
+    final response = await http.delete(url);
+
+    if (response.statusCode >= 400) {
+      setState(() {
+        _groceryItem.insert(index, newItem);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: const Text("Could not delete item. Try again later."),
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          content: const Text("Item deleted"),
+        ),
+      );
+    }
   }
 
   @override
@@ -54,6 +126,10 @@ class _ShoppingListState extends State<ShoppingList> {
         style: TextStyle(fontWeight: FontWeight.bold),
       ),
     );
+
+    if (_isLoading) {
+      content = const Center(child: CircularProgressIndicator());
+    }
 
     if (_groceryItem.isNotEmpty) {
       content = ListView.builder(
@@ -74,6 +150,12 @@ class _ShoppingListState extends State<ShoppingList> {
           ),
           onDismissed: (direction) => _onRemoveItem(_groceryItem[index]),
         ),
+      );
+    }
+
+    if (_error != null) {
+      content = Center(
+        child: Text(_error!, style: TextStyle(fontWeight: FontWeight.bold)),
       );
     }
 

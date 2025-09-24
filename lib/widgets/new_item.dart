@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shopping_list/data/categories.dart';
 import 'package:shopping_list/models/category.dart';
+import 'package:http/http.dart' as http;
 import 'package:shopping_list/models/grocery_item.dart';
 
 class NewItemScreen extends StatefulWidget {
@@ -16,19 +18,53 @@ class _NewItemScreenState extends State<NewItemScreen> {
   final _formKey = GlobalKey<FormState>();
   var _enteredName = '';
   var _entereQuantity = 1;
+  var _isSending = false;
   var _selectedCategory = categories[Categories.vegetables]!;
 
-  void _saveItem() {
+  void _saveItem() async {
     if (_formKey.currentState!.validate()) {
       _formKey.currentState!.save();
-      Navigator.of(context).pop(
-        GroceryItem(
-          id: DateTime.now().toString(),
-          name: _enteredName,
-          quantity: _entereQuantity,
-          category: _selectedCategory,
-        ),
+      setState(() {
+        _isSending = true;
+      });
+      final url = Uri.https(
+        'flutter-prep-2bea8-default-rtdb.firebaseio.com',
+        'shopping-list.json',
       );
+      try {
+        final response = await http.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'name': _enteredName,
+            'quantity': _entereQuantity,
+            'category': _selectedCategory.title,
+          }),
+        );
+        print(response.body);
+        print(response.statusCode);
+        final Map<String, dynamic> resData = json.decode(response.body);
+        if (!context.mounted) {
+          return;
+        }
+        Navigator.of(context).pop(
+          GroceryItem(
+            id: resData['name'],
+            name: _enteredName,
+            quantity: _entereQuantity,
+            category: _selectedCategory,
+          ),
+        );
+      } catch (error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 2),
+            content: const Text(
+              "Something went wrong!. Please try again later.",
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -115,14 +151,22 @@ class _NewItemScreenState extends State<NewItemScreen> {
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: () {
-                      _formKey.currentState!.reset();
-                    },
+                    onPressed: _isSending
+                        ? null
+                        : () {
+                            _formKey.currentState!.reset();
+                          },
                     child: const Text("Reset"),
                   ),
                   ElevatedButton(
-                    onPressed: _saveItem,
-                    child: const Text("Add Item"),
+                    onPressed: _isSending ? null : _saveItem,
+                    child: _isSending
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(),
+                          )
+                        : const Text("Add Item"),
                   ),
                 ],
               ),
